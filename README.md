@@ -2,6 +2,18 @@
 
 My second project in Natural Language Processing (NLP), where I fine-tuned a bert-base-uncased model to classify spam SMS. This is huge improvements from https://github.com/fzn0x/bert-indonesian-english-hate-comments.
 
+## How to use this model?
+
+```py
+from transformers import BertTokenizer, BertForSequenceClassification
+import torch
+
+tokenizer = BertTokenizer.from_pretrained('fzn0x/bert-spam-classification-model')
+model = BertForSequenceClassification.from_pretrained('fzn0x/bert-spam-classification-model')
+```
+
+Check [scripts/predict.py](./scripts/predict.py) for full example (You just need to modify the argument of from_pretrained).
+
 ## ✅ Install requirements
 
 Install required dependencies
