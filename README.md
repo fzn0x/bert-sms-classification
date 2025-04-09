@@ -60,7 +60,7 @@ python scripts/train.py
 python scripts/predict.py
 ```
 
-✅ Dataset Location: `data/dataset.csv`, modify the dataset to enhance the model based on your needs.
+✅ Dataset Location: [`data/spam.csv`](./data/spam.csv), modify the dataset to enhance the model based on your needs.
 
 
 ## 📚 Citations
@@ -83,7 +83,7 @@ See [`citations.bib`](./citations.bib) for full BibTeX entries.
 
 ## License and Usage
 
-License under MIT license.
+License under [MIT license](./LICENSE).
 
 ---
 
