@@ -1,0 +1,13 @@
+FINAL TEST SET METRICS
+eval_loss: 0.0462123304605484
+eval_accuracy: 0.992822966507177
+eval_precision: 0.9929002814263057
+eval_recall: 0.992822966507177
+eval_f1: 0.9928497599222166
+eval_runtime: 136.227
+eval_samples_per_second: 6.137
+eval_steps_per_second: 0.389
+epoch: 5.0
+
+CONFUSION MATRIX
+None

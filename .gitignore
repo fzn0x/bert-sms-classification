@@ -1,4 +1,2 @@
 # Ignore Python virtual environment
 bert-env/
-
-models/pretrained

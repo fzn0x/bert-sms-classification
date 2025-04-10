@@ -1,17 +1,10 @@
 import logging
-
 from datetime import datetime
-
-import re
-from collections import Counter
-
 import pandas as pd
 import numpy as np
-
 import torch
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import Dataset, DataLoader
-
 from transformers import (
     BertConfig,
     BertForSequenceClassification,
@@ -20,7 +13,6 @@ from transformers import (
     TrainingArguments,
     EarlyStoppingCallback,
 )
-
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score,
@@ -31,10 +23,11 @@ from sklearn.metrics import (
 )
 from sklearn.utils.class_weight import compute_class_weight
 
+# Setup
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 config = BertConfig.from_pretrained("bert-base-uncased", num_labels=2)
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+last_confusion_matrix = None 
 
 class WeightedBertForSequenceClassification(BertForSequenceClassification):
     def __init__(self, config, class_weights):
@@ -73,7 +66,7 @@ def compute_metrics(eval_pred):
     f1 = f1_score(labels, predictions, average='weighted')
     cm = confusion_matrix(labels, predictions)
 
-    print("Confusion Matrix:\n", cm)
+    last_confusion_matrix = cm
 
     return {
         'accuracy': acc,
@@ -83,14 +76,19 @@ def compute_metrics(eval_pred):
     }
 
 def train():
+    # Load and preprocess data
     df = pd.read_csv('data/spam.csv', encoding='iso-8859-1')[['label', 'text']]
+    df['label'] = df['label'].map({'spam': 1, 'ham': 0})
 
-    label_mapping = {'spam': 1, 'ham': 0}
-    df['label'] = df['label'].map(label_mapping)
+    # Split into train (70%), validation (15%), test (15%)
+    train_texts, temp_texts, train_labels, temp_labels = train_test_split(
+        df['text'], df['label'], test_size=0.30, random_state=42, stratify=df['label']
+    )
+    val_texts, test_texts, val_labels, test_labels = train_test_split(
+        temp_texts, temp_labels, test_size=0.5, random_state=42, stratify=temp_labels
+    )
 
-    train_texts, val_texts, train_labels, val_labels = train_test_split(
-        df['text'].tolist(), df['label'].tolist(), test_size=0.25, random_state=42)
-
+    # Compute class weights from training labels
     class_weights = compute_class_weight(
         class_weight='balanced',
         classes=np.unique(train_labels),
@@ -98,22 +96,29 @@ def train():
     )
     class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
+    # Silence excessive logging
+    for logger in logging.root.manager.loggerDict:
+        if "transformers" in logger.lower():
+            logging.getLogger(logger).setLevel(logging.ERROR)
+
+    # Initialize model
     model = WeightedBertForSequenceClassification(config, class_weights=class_weights)
-
-    loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
-    for logger in loggers:
-        if "transformers" in logger.name.lower():
-            logger.setLevel(logging.ERROR)
-
-    model.load_state_dict(BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=2, use_safetensors=True, return_dict=False, attn_implementation="sdpa").state_dict(), strict=False)
+    model.load_state_dict(BertForSequenceClassification.from_pretrained(
+        "bert-base-uncased", num_labels=2, use_safetensors=True, return_dict=False, attn_implementation="sdpa"
+    ).state_dict(), strict=False)
     model.to(device)
 
-    train_encodings = tokenizer(train_texts, truncation=True, padding=True, return_tensors="pt")
-    val_encodings = tokenizer(val_texts, truncation=True, padding=True, return_tensors="pt")
+    # Tokenize
+    train_encodings = tokenizer(train_texts.tolist(), truncation=True, padding=True, return_tensors="pt")
+    val_encodings = tokenizer(val_texts.tolist(), truncation=True, padding=True, return_tensors="pt")
+    test_encodings = tokenizer(test_texts.tolist(), truncation=True, padding=True, return_tensors="pt")
 
-    train_dataset = SMSClassificationDataset(train_encodings, train_labels)
-    val_dataset = SMSClassificationDataset(val_encodings, val_labels)
+    # Datasets
+    train_dataset = SMSClassificationDataset(train_encodings, train_labels.tolist())
+    val_dataset = SMSClassificationDataset(val_encodings, val_labels.tolist())
+    test_dataset = SMSClassificationDataset(test_encodings, test_labels.tolist())
 
+    # Training setup
     training_args = TrainingArguments(
         output_dir='./models/pretrained',
         num_train_epochs=5,
@@ -130,6 +135,7 @@ def train():
         save_strategy="epoch",
     )
 
+    # Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -139,16 +145,33 @@ def train():
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
     )
 
+    # Train
     trainer.train()
 
+    # Save logs
     logs = trainer.state.log_history
-    df_logs = pd.DataFrame(logs)
-
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    df_logs.to_csv(f"logs/training_logs_{timestamp}.csv", index=False)
+    pd.DataFrame(logs).to_csv(f"logs/training_logs_{timestamp}.csv", index=False)
 
+    # Save model and tokenizer
     tokenizer.save_pretrained('./models/pretrained')
     model.save_pretrained('./models/pretrained')
+
+    # Final test set evaluation
+    print("\nEvaluating on FINAL TEST SET:")
+    final_test_metrics = trainer.evaluate(eval_dataset=test_dataset)
+    print("Final Test Set Metrics:", final_test_metrics)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f"logs/final_test_results_{timestamp}.txt"
+
+    with open(log_filename, "w") as f:
+        f.write("FINAL TEST SET METRICS\n")
+        for key, value in final_test_metrics.items():
+            f.write(f"{key}: {value}\n")
+        
+        f.write("\nCONFUSION MATRIX\n")
+        f.write(str(last_confusion_matrix))
 
 if __name__ == "__main__":
     train()
